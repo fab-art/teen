@@ -1,8 +1,13 @@
 """
 sidebar.py — call render_sidebar() at the top of every page.
 Builds the persistent nav panel, respects role-based visibility.
+
+Uses st.button + st.switch_page instead of st.page_link to avoid
+a KeyError on page_data["url_pathname"] that occurs in newer Streamlit
+versions when the PagesManager hasn't fully registered pages yet.
 """
 import streamlit as st
+import os
 from users import can, current_role, current_user, logout
 from styles import badge
 
@@ -23,7 +28,6 @@ ROLE_BADGE = {
 }
 
 def render_sidebar():
-    # Inject sidebar CSS once
     st.markdown("""
 <style>
 [data-testid="stSidebar"] {
@@ -32,44 +36,49 @@ def render_sidebar():
 }
 [data-testid="stSidebar"] > div:first-child { padding: 0 !important; }
 
-[data-testid="stSidebar"] [data-testid="stPageLink"] a {
-    display: flex !important;
-    align-items: center !important;
-    gap: 9px !important;
-    padding: 9px 12px !important;
-    margin: 2px 10px !important;
+/* Nav buttons */
+[data-testid="stSidebar"] [data-testid="stButton"] button {
+    background: transparent !important;
+    border: 1px solid transparent !important;
     border-radius: 4px !important;
+    color: #9a9080 !important;
     font-size: 12.5px !important;
     font-family: Jost, sans-serif !important;
     font-weight: 400 !important;
-    color: #9a9080 !important;
-    text-decoration: none !important;
-    border: 1px solid transparent !important;
+    letter-spacing: 0 !important;
+    text-align: left !important;
+    padding: 9px 12px !important;
+    margin: 2px 10px !important;
+    width: calc(100% - 20px) !important;
     transition: background .15s, color .15s !important;
 }
-[data-testid="stSidebar"] [data-testid="stPageLink"] a:hover {
+[data-testid="stSidebar"] [data-testid="stButton"] button:hover {
     background: rgba(232,224,204,0.05) !important;
+    border-color: transparent !important;
     color: #e8e0cc !important;
 }
-[data-testid="stSidebar"] [data-testid="stPageLink-active"] a {
+/* Active nav button */
+[data-testid="stSidebar"] [data-testid="stButton"] button[kind="primary"] {
     background: rgba(196,154,44,0.11) !important;
     border-color: rgba(196,154,44,0.22) !important;
     color: #c49a2c !important;
     font-weight: 500 !important;
 }
-[data-testid="stSidebar"] [data-testid="stButton"] button {
-    background: transparent !important;
-    border: 1px solid rgba(232,224,204,0.1) !important;
+[data-testid="stSidebar"] [data-testid="stButton"] button[kind="primary"]:hover {
+    background: rgba(196,154,44,0.16) !important;
+    color: #c49a2c !important;
+}
+/* Sign-out button override */
+[data-testid="stSidebar"] [data-testid="stButton"]:last-of-type button {
+    border-color: rgba(232,224,204,0.1) !important;
     color: #534f47 !important;
     font-size: 11.5px !important;
-    font-family: Jost, sans-serif !important;
     letter-spacing: .05em !important;
-    margin: 0 10px !important;
-    width: calc(100% - 20px) !important;
 }
-[data-testid="stSidebar"] [data-testid="stButton"] button:hover {
+[data-testid="stSidebar"] [data-testid="stButton"]:last-of-type button:hover {
     border-color: rgba(184,64,48,0.4) !important;
     color: #b84030 !important;
+    background: transparent !important;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -94,10 +103,23 @@ def render_sidebar():
 </div>""", unsafe_allow_html=True)
 
         # ── Navigation ─────────────────────────────────────────
+        # Determine the currently active page to highlight it
+        try:
+            current_script = st.context.pages.get("current", {}).get("script_path", "")
+        except Exception:
+            current_script = ""
+
         for label, icon, page, perm in NAV_ITEMS:
             if perm and not can(perm):
                 continue
-            st.page_link(page, label=f"{icon}  {label}")
+            # Highlight the active page button
+            try:
+                is_active = os.path.basename(current_script) == os.path.basename(page)
+            except Exception:
+                is_active = False
+            btn_type = "primary" if is_active else "secondary"
+            if st.button(f"{icon}  {label}", key=f"nav_{label}", use_container_width=True, type=btn_type):
+                st.switch_page(page)
 
         # ── Sign out ───────────────────────────────────────────
         st.markdown("<div style='margin-top:16px;border-top:1px solid rgba(232,224,204,0.07);padding-top:12px'>", unsafe_allow_html=True)
