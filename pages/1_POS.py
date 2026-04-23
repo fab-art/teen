@@ -4,7 +4,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from styles import inject, section_title, fmt, divider
 from users import require_auth, can
 from sidebar import render_sidebar
-from db import get_sb, audit
+from db import get_sb, audit, fetch_catalog_for_pos, fetch_catalog_cost_map
 
 st.set_page_config(page_title="POS — Duka", page_icon="◉", layout="wide", initial_sidebar_state="expanded")
 inject()
@@ -14,7 +14,7 @@ render_sidebar()
 sb = get_sb()
 section_title("Point of Sale", "Create new orders")
 
-catalog = sb.table("catalog").select("item_id,name,uom,default_sell_price,current_landed_cost").eq("is_active", True).order("name").execute().data
+catalog = fetch_catalog_for_pos(sb)
 if "cart" not in st.session_state:
     st.session_state.cart = []
 
@@ -96,8 +96,7 @@ with col_r:
             else:
                 with st.spinner("Processing..."):
                     ids = [l["item_id"] for l in st.session_state.cart]
-                    cr = sb.table("catalog").select("item_id,current_landed_cost").in_("item_id",ids).execute()
-                    cm = {r["item_id"]:r["current_landed_cost"] for r in cr.data}
+                    cm = fetch_catalog_cost_map(sb, ids)
                     total = sum(l["quantity"]*l["unit_price"] for l in st.session_state.cart)
                     order = sb.table("sales_orders").insert({"customer_name":cname,"customer_phone":cphone,"total_amount":total,"deposit_paid":deposit,"status":"Pending","notes":notes,"created_by":st.session_state.get("username")}).execute().data[0]
                     oid = order["order_id"]
