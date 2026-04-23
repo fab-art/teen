@@ -172,11 +172,24 @@ def fetch_dashboard_snapshot(role: str):
         )
     elif role == "manager":
         payload["expenses"] = _safe_execute(
+        payload.update(
+            {
+                "lines": sb.table("order_lines").select("line_cogs").execute().data,
+                "expenses": sb.table("expenses").select("amount,category").execute().data,
+                "inventory_catalog": sb.table("catalog").select("item_id,current_landed_cost").execute().data,
+                "inventory_ledger": sb.table("inventory_ledger").select("item_id,quantity_change").execute().data,
+            }
+        )
+    elif role == "manager":
+        payload["expenses"] = (
             sb.table("expenses")
             .select("amount,category,description,expense_date")
             .order("expense_date", desc=True)
             .limit(50)
         ) or []
+            .execute()
+            .data
+        )
     elif role == "cashier":
         payload["inventory"] = load_inventory(sb=sb)
 
