@@ -67,9 +67,8 @@ render_sidebar()
 # ════════════════════════════════════════════════════════════
 # DASHBOARD — content varies by role
 # ════════════════════════════════════════════════════════════
-from db import get_sb, fmt_dt
+from db import fetch_dashboard_snapshot, compute_inventory_value, fmt_dt
 
-sb   = get_sb()
 role = current_role()
 name = st.session_state.get("full_name", "User")
 
@@ -96,17 +95,17 @@ if visible:
 divider()
 
 # ── Shared data fetches ───────────────────────────────────────
-orders   = sb.table("sales_orders").select("order_id,total_amount,deposit_paid,balance_due,status,customer_name,created_at").order("created_at", desc=True).limit(200).execute().data
-catalog  = sb.table("catalog").select("item_id,name,uom,stock_on_hand:current_landed_cost,default_sell_price").execute().data if role == "cashier" else []
+snapshot = fetch_dashboard_snapshot(role)
+orders = snapshot.get("orders", [])
 
 # ════════════════════════════════════════════════════════════
 # ADMIN DASHBOARD — full company metrics
 # ════════════════════════════════════════════════════════════
 if role == "admin":
-    lines    = sb.table("order_lines").select("line_cogs").execute().data
-    expenses = sb.table("expenses").select("amount,category").execute().data
-    inv_data = sb.table("catalog").select("item_id,current_landed_cost").execute().data
-    led_data = sb.table("inventory_ledger").select("item_id,quantity_change").execute().data
+    lines = snapshot.get("lines", [])
+    expenses = snapshot.get("expenses", [])
+    inv_data = snapshot.get("inventory_catalog", [])
+    led_data = snapshot.get("inventory_ledger", [])
 
     # Calculations
     revenue   = sum(o["total_amount"] for o in orders if o["status"] != "Cancelled")
@@ -118,10 +117,7 @@ if role == "admin":
     pending   = sum(1 for o in orders if o["status"] == "Pending")
 
     # Inventory value
-    totals = {}
-    for r in led_data:
-        totals[r["item_id"]] = totals.get(r["item_id"], 0) + r["quantity_change"]
-    inv_value = sum(max(totals.get(c["item_id"],0),0) * c["current_landed_cost"] for c in inv_data)
+    inv_value = compute_inventory_value(inv_data, led_data)
 
     # Row 1 — Core P&L
     st.markdown('<h3>Profit & Loss</h3>', unsafe_allow_html=True)
@@ -201,7 +197,7 @@ if role == "admin":
 # MANAGER DASHBOARD — sales + expenses, no profit
 # ════════════════════════════════════════════════════════════
 elif role == "manager":
-    expenses = sb.table("expenses").select("amount,category,description,expense_date").order("expense_date", desc=True).limit(50).execute().data
+    expenses = snapshot.get("expenses", [])
 
     revenue   = sum(o["total_amount"] for o in orders if o["status"] != "Cancelled")
     total_exp = sum(e["amount"] for e in expenses)
@@ -256,8 +252,7 @@ elif role == "manager":
 # CASHIER DASHBOARD — goods list + today's orders
 # ════════════════════════════════════════════════════════════
 elif role == "cashier":
-    from db import load_inventory
-    inv = load_inventory()
+    inv = snapshot.get("inventory", [])
 
     # Simple stats for cashier
     total_items = len(inv)
