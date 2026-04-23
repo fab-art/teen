@@ -1,7 +1,9 @@
+# -*- coding: utf-8 -*-
 import streamlit as st
 import json
 from datetime import datetime
 from supabase import create_client
+from postgrest.exceptions import APIError
 
 # ── Constants ──────────────────────────────────────────────────
 STATUS_COLORS = {"Pending": "gold", "Ready": "info", "Delivered": "success", "Cancelled": "danger"}
@@ -14,10 +16,10 @@ def get_sb():
 
 
 def _safe_execute(query):
-    """Execute a Supabase query and return data, swallowing schema mismatch errors."""
+    """Execute a Supabase query and return data, swallowing schema mismatch API errors."""
     try:
         return query.execute().data
-    except Exception:
+    except APIError:
         return None
 
 
@@ -172,24 +174,11 @@ def fetch_dashboard_snapshot(role: str):
         )
     elif role == "manager":
         payload["expenses"] = _safe_execute(
-        payload.update(
-            {
-                "lines": sb.table("order_lines").select("line_cogs").execute().data,
-                "expenses": sb.table("expenses").select("amount,category").execute().data,
-                "inventory_catalog": sb.table("catalog").select("item_id,current_landed_cost").execute().data,
-                "inventory_ledger": sb.table("inventory_ledger").select("item_id,quantity_change").execute().data,
-            }
-        )
-    elif role == "manager":
-        payload["expenses"] = (
             sb.table("expenses")
             .select("amount,category,description,expense_date")
             .order("expense_date", desc=True)
             .limit(50)
         ) or []
-            .execute()
-            .data
-        )
     elif role == "cashier":
         payload["inventory"] = load_inventory(sb=sb)
 
