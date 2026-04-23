@@ -109,7 +109,7 @@ def audit(table, record_id, action, old_data=None, new_data=None, reason=None, c
     from users import current_user
     u = current_user()
     
-    sb.table("audit_log").insert({
+    payload = {
         "table_name": table,
         "record_id": str(record_id),
         "action": action,
@@ -119,7 +119,28 @@ def audit(table, record_id, action, old_data=None, new_data=None, reason=None, c
         "reason": reason,
         "performed_by_username": u.get("username") if u else None,
         "performed_by_name": u.get("full_name") if u else None,
-    }).execute()
+    }
+
+    # Backward-compatible insert for deployments where audit_log schema differs.
+    # If PostgREST reports a missing column, remove it and retry.
+    while True:
+        try:
+            sb.table("audit_log").insert(payload).execute()
+            break
+        except APIError as err:
+            message = str(err)
+            marker = "Could not find the '"
+            if marker not in message:
+                raise
+
+            try:
+                missing_col = message.split(marker, 1)[1].split("' column", 1)[0]
+            except Exception:
+                raise
+
+            if missing_col not in payload:
+                raise
+            payload.pop(missing_col, None)
 
 def fmt(n):
     """Format number as currency with 2 decimal places."""
@@ -147,39 +168,43 @@ def fetch_dashboard_snapshot(role: str):
     operational data relatively fresh for Streamlit Cloud sessions.
     """
     sb = get_sb()
-    orders = (
+    orders_result = (
         sb.table("sales_orders")
         .select("order_id,total_amount,deposit_paid,balance_due,status,customer_name,created_at")
         .order("created_at", desc=True)
         .limit(200)
         .execute()
-        .data
     )
-
-    payload = {"orders": orders}
+    payload = {"orders": orders_result.data or []}
 
     if role == "admin":
         inventory_catalog = _safe_execute(sb.table("catalog").select("item_id,current_landed_cost"))
         if inventory_catalog is None:
-            inventory_catalog = _safe_execute(sb.table("catalog").select("item_id")) or []
-            inventory_catalog = [{"item_id": r["item_id"], "current_landed_cost": 0} for r in inventory_catalog]
+            item_only_rows = _safe_execute(sb.table("catalog").select("item_id")) or []
+            inventory_catalog = [
+                {"item_id": row["item_id"], "current_landed_cost": 0}
+                for row in item_only_rows
+            ]
 
-        payload.update(
-            {
-                "lines": _safe_execute(sb.table("order_lines").select("line_cogs")) or [],
-                "expenses": _safe_execute(sb.table("expenses").select("amount,category")) or [],
-                "inventory_catalog": inventory_catalog,
-                "inventory_ledger": _safe_execute(sb.table("inventory_ledger").select("item_id,quantity_change")) or [],
-            }
+        payload["lines"] = _safe_execute(sb.table("order_lines").select("line_cogs")) or []
+        payload["expenses"] = _safe_execute(sb.table("expenses").select("amount,category")) or []
+        payload["inventory_catalog"] = inventory_catalog
+        payload["inventory_ledger"] = (
+            _safe_execute(sb.table("inventory_ledger").select("item_id,quantity_change")) or []
         )
-    elif role == "manager":
-        payload["expenses"] = _safe_execute(
-            sb.table("expenses")
-            .select("amount,category,description,expense_date")
-            .order("expense_date", desc=True)
-            .limit(50)
-        ) or []
-    elif role == "cashier":
+
+    if role == "manager":
+        payload["expenses"] = (
+            _safe_execute(
+                sb.table("expenses")
+                .select("amount,category,description,expense_date")
+                .order("expense_date", desc=True)
+                .limit(50)
+            )
+            or []
+        )
+
+    if role == "cashier":
         payload["inventory"] = load_inventory(sb=sb)
 
     return payload
