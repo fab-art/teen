@@ -13,6 +13,14 @@ def get_sb():
     return create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
 
 
+def _safe_execute(query):
+    """Execute a Supabase query and return data, swallowing schema mismatch errors."""
+    try:
+        return query.execute().data
+    except Exception:
+        return None
+
+
 def _sum_quantities_by_item(rows):
     """Aggregate inventory ledger quantity changes by item_id."""
     totals = {}
@@ -33,10 +41,19 @@ def load_inventory(sb=None):
     if sb is None:
         sb = get_sb()
     
-    # Fetch active catalog items
-    cat = sb.table("catalog").select(
-        "item_id,name,type,uom,current_landed_cost,default_sell_price,is_active"
-    ).eq("is_active", True).order("name").execute().data
+    # Fetch active catalog items (with fallback for schemas that do not have is_active)
+    cat = _safe_execute(
+        sb.table("catalog")
+        .select("item_id,name,type,uom,current_landed_cost,default_sell_price,is_active")
+        .eq("is_active", True)
+        .order("name")
+    )
+    if cat is None:
+        cat = _safe_execute(
+            sb.table("catalog")
+            .select("item_id,name,type,uom,current_landed_cost,default_sell_price")
+            .order("name")
+        ) or []
     
     if not cat:
         return []
@@ -140,6 +157,21 @@ def fetch_dashboard_snapshot(role: str):
     payload = {"orders": orders}
 
     if role == "admin":
+        inventory_catalog = _safe_execute(sb.table("catalog").select("item_id,current_landed_cost"))
+        if inventory_catalog is None:
+            inventory_catalog = _safe_execute(sb.table("catalog").select("item_id")) or []
+            inventory_catalog = [{"item_id": r["item_id"], "current_landed_cost": 0} for r in inventory_catalog]
+
+        payload.update(
+            {
+                "lines": _safe_execute(sb.table("order_lines").select("line_cogs")) or [],
+                "expenses": _safe_execute(sb.table("expenses").select("amount,category")) or [],
+                "inventory_catalog": inventory_catalog,
+                "inventory_ledger": _safe_execute(sb.table("inventory_ledger").select("item_id,quantity_change")) or [],
+            }
+        )
+    elif role == "manager":
+        payload["expenses"] = _safe_execute(
         payload.update(
             {
                 "lines": sb.table("order_lines").select("line_cogs").execute().data,
@@ -154,6 +186,7 @@ def fetch_dashboard_snapshot(role: str):
             .select("amount,category,description,expense_date")
             .order("expense_date", desc=True)
             .limit(50)
+        ) or []
             .execute()
             .data
         )
@@ -167,3 +200,53 @@ def compute_inventory_value(catalog_rows, ledger_rows):
     """Compute total inventory valuation from catalog costs and ledger balances."""
     totals = _sum_quantities_by_item(ledger_rows)
     return sum(max(totals.get(c["item_id"], 0), 0) * c["current_landed_cost"] for c in catalog_rows or [])
+
+
+def fetch_catalog_for_pos(sb):
+    """
+    Fetch POS catalog data with compatibility fallbacks for older/newer schemas.
+    """
+    select_candidates = [
+        ("item_id,name,uom,default_sell_price,current_landed_cost,is_active", True),
+        ("item_id,name,uom,default_sell_price,current_landed_cost", False),
+        ("item_id,name,uom,default_sell_price,is_active", True),
+        ("item_id,name,uom,default_sell_price", False),
+        ("item_id,name,uom,current_landed_cost,is_active", True),
+        ("item_id,name,uom,current_landed_cost", False),
+        ("item_id,name,uom", False),
+    ]
+
+    rows = []
+    for select_clause, has_is_active in select_candidates:
+        query = sb.table("catalog").select(select_clause).order("name")
+        if has_is_active:
+            query = query.eq("is_active", True)
+        rows = _safe_execute(query)
+        if rows is not None:
+            break
+
+    normalized = []
+    for row in rows or []:
+        normalized.append(
+            {
+                "item_id": row.get("item_id"),
+                "name": row.get("name", "Unnamed Item"),
+                "uom": row.get("uom", "unit"),
+                "default_sell_price": float(row.get("default_sell_price") or 0),
+                "current_landed_cost": float(row.get("current_landed_cost") or 0),
+            }
+        )
+    return normalized
+
+
+def fetch_catalog_cost_map(sb, item_ids):
+    """Return {item_id: current_landed_cost} with fallback for missing cost columns."""
+    if not item_ids:
+        return {}
+    rows = _safe_execute(
+        sb.table("catalog").select("item_id,current_landed_cost").in_("item_id", item_ids)
+    )
+    if rows is None:
+        rows = _safe_execute(sb.table("catalog").select("item_id").in_("item_id", item_ids)) or []
+        return {r["item_id"]: 0 for r in rows}
+    return {r["item_id"]: float(r.get("current_landed_cost") or 0) for r in rows}
