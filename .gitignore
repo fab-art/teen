@@ -1,4 +1,7 @@
-```
+# Python cache / tooling
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
 # Streamlit
-.streamlit/
-```
+.streamlit/secrets.toml
