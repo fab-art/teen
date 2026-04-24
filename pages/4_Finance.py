@@ -4,6 +4,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from styles import inject, section_title, kpi, fmt, fmt_dt, divider, table_html
 from users import require_permission, can
 from sidebar import render_sidebar, render_home_button
+from db import get_sb, audit, insert_with_schema_fallback, update_with_schema_fallback
 from db import get_sb, audit
 from postgrest.exceptions import APIError
 
@@ -113,8 +114,8 @@ with tab_exp:
             if st.form_submit_button("Log",type="primary",use_container_width=True):
                 if not desc or not amt: st.error("Fill description and amount")
                 else:
-                    res=sb.table("expenses").insert({"description":desc,"amount":amt,"category":cat,"created_by":st.session_state.get("username")}).execute().data[0]
-                    audit("expenses",res["expense_id"],"INSERT",new_data=res,reason="Expense logged")
+                    res=insert_with_schema_fallback(sb, "expenses", {"description":desc,"amount":amt,"category":cat,"created_by":st.session_state.get("username")}) or {}
+                    audit("expenses",res.get("expense_id","expense"),"INSERT",new_data=res,reason="Expense logged")
                     st.success("Logged!"); st.rerun()
     with col2:
         st.markdown('<h3>Recent Expenses</h3>', unsafe_allow_html=True)
@@ -126,7 +127,7 @@ with tab_exp:
             c1.markdown(f'<div style="{opacity}padding:6px 0;border-bottom:1px solid rgba(0,0,0,0.04)"><span style="font-size:13px;color:#1a1612">{e["description"]}</span> <span style="font-family:DM Mono,monospace;font-size:11.5px;color:#b8890a;margin-left:6px">{fmt(e["amount"])}</span> <span style="font-size:10px;color:#847e76;margin-left:5px">{e.get("expense_date","")}</span></div>', unsafe_allow_html=True)
             if not voided and can("void_expenses"):
                 if c2.button("Void",key=f"ve_{e['expense_id']}"):
-                    old=dict(e); sb.table("expenses").update({"is_voided":True}).eq("expense_id",e["expense_id"]).execute()
+                    old=dict(e); update_with_schema_fallback(sb, "expenses", {"is_voided":True}, "expense_id", e["expense_id"])
                     audit("expenses",e["expense_id"],"VOID",old_data=old,reason="Voided by admin")
                     st.rerun()
 

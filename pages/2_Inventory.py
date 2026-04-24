@@ -5,6 +5,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from styles import inject, section_title, kpi, fmt, table_html
 from users import require_permission, can
 from sidebar import render_sidebar, render_home_button
+from db import get_sb, audit, load_inventory, moving_avg_lc, insert_with_schema_fallback, update_with_schema_fallback
 from db import get_sb, audit, load_inventory, moving_avg_lc, insert_with_schema_fallback
 
 st.set_page_config(page_title="Inventory — Duka", page_icon="◫", layout="wide", initial_sidebar_state="expanded")
@@ -135,6 +136,10 @@ with tab4:
         c3.markdown(f'<span style="font-size:11px;font-family:DM Mono,monospace;color:#c49a2c">SP: {fmt(item["default_sell_price"])}</span>', unsafe_allow_html=True)
         if can("manage_catalog"):
             if c4.button("Deactivate" if active else "Reactivate",key=f"tog_{item['item_id']}"):
-                old={"is_active":active}; sb.table("catalog").update({"is_active":not active}).eq("item_id",item["item_id"]).execute()
-                audit("catalog",item["item_id"],"UPDATE",old_data=old,new_data={"is_active":not active},changed_fields=["is_active"],reason=f"Item {'deactivated' if active else 'reactivated'}")
-                st.rerun()
+                old={"is_active":active}
+                upd = update_with_schema_fallback(sb, "catalog", {"is_active":not active}, "item_id", item["item_id"])
+                if upd is None:
+                    st.warning("Catalog active/inactive toggle is not supported by this database schema.")
+                else:
+                    audit("catalog",item["item_id"],"UPDATE",old_data=old,new_data={"is_active":not active},changed_fields=["is_active"],reason=f"Item {'deactivated' if active else 'reactivated'}")
+                    st.rerun()

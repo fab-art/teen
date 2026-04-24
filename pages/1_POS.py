@@ -4,6 +4,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from styles import inject, section_title, fmt, divider
 from users import require_auth, can
 from sidebar import render_sidebar, render_home_button
+from db import get_sb, audit, fetch_catalog_for_pos, fetch_catalog_cost_map, insert_with_schema_fallback
 from db import get_sb, audit, fetch_catalog_for_pos, fetch_catalog_cost_map
 
 st.set_page_config(page_title="POS — Duka", page_icon="◉", layout="wide", initial_sidebar_state="expanded")
@@ -99,12 +100,15 @@ with col_r:
                     ids = [l["item_id"] for l in st.session_state.cart]
                     cm = fetch_catalog_cost_map(sb, ids)
                     total = sum(l["quantity"]*l["unit_price"] for l in st.session_state.cart)
-                    order = sb.table("sales_orders").insert({"customer_name":cname,"customer_phone":cphone,"total_amount":total,"deposit_paid":deposit,"status":"Pending","notes":notes,"created_by":st.session_state.get("username")}).execute().data[0]
-                    oid = order["order_id"]
+                    order = insert_with_schema_fallback(sb, "sales_orders", {"customer_name":cname,"customer_phone":cphone,"total_amount":total,"deposit_paid":deposit,"status":"Pending","notes":notes,"created_by":st.session_state.get("username")}) or {}
+                    oid = order.get("order_id")
+                    if oid is None:
+                        st.error("Order created but no order_id was returned by the database schema.")
+                        st.stop()
                     for line in st.session_state.cart:
                         cogs=(cm.get(line["item_id"],0) or 0)*line["quantity"]
-                        sb.table("order_lines").insert({"order_id":oid,"item_id":line["item_id"],"quantity":line["quantity"],"unit_price":line["unit_price"],"line_cogs":cogs}).execute()
-                        sb.table("inventory_ledger").insert({"item_id":line["item_id"],"transaction_type":"SALE","quantity_change":-line["quantity"],"unit_cost":cm.get(line["item_id"],0),"reference_id":oid,"created_by":st.session_state.get("username")}).execute()
+                        insert_with_schema_fallback(sb, "order_lines", {"order_id":oid,"item_id":line["item_id"],"quantity":line["quantity"],"unit_price":line["unit_price"],"line_cogs":cogs})
+                        insert_with_schema_fallback(sb, "inventory_ledger", {"item_id":line["item_id"],"transaction_type":"SALE","quantity_change":-line["quantity"],"unit_cost":cm.get(line["item_id"],0),"reference_id":oid,"created_by":st.session_state.get("username")})
                     audit("sales_orders",oid,"INSERT",new_data=order,reason="POS order placed")
                     st.success(f"Order placed! Balance due: {fmt(total-deposit)}")
                     st.session_state.cart=[]; st.rerun()

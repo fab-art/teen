@@ -31,6 +31,18 @@ def _sum_quantities_by_item(rows):
         totals[item_id] = totals.get(item_id, 0) + row["quantity_change"]
     return totals
 
+
+def _missing_column_from_error(err):
+    """Parse PostgREST missing-column errors and return the column name."""
+    message = str(err)
+    marker = "Could not find the '"
+    if marker not in message:
+        return None
+    try:
+        return message.split(marker, 1)[1].split("' column", 1)[0]
+    except Exception:
+        return None
+
 def load_inventory(sb=None):
     """Load inventory with stock levels efficiently.
     
@@ -128,6 +140,9 @@ def audit(table, record_id, action, old_data=None, new_data=None, reason=None, c
             sb.table("audit_log").insert(payload).execute()
             break
         except Exception as err:
+            missing_col = _missing_column_from_error(err)
+            if not missing_col:
+                raise
             message = str(err)
             marker = "Could not find the '"
             if marker not in message:
@@ -279,6 +294,28 @@ def insert_with_schema_fallback(sb, table_name, payload):
             result = sb.table(table_name).insert(row).execute()
             return (result.data or [None])[0]
         except Exception as err:
+            missing_col = _missing_column_from_error(err)
+            if not missing_col:
+                raise
+            if missing_col not in row:
+                raise
+            row.pop(missing_col, None)
+
+
+def update_with_schema_fallback(sb, table_name, payload, match_col, match_val):
+    """
+    Update row while tolerating missing payload columns in older schemas.
+    """
+    row = dict(payload)
+    while True:
+        if not row:
+            return None
+        try:
+            return sb.table(table_name).update(row).eq(match_col, match_val).execute().data
+        except Exception as err:
+            missing_col = _missing_column_from_error(err)
+            if not missing_col:
+                raise
             message = str(err)
             marker = "Could not find the '"
             if marker not in message:
