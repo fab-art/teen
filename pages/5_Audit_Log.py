@@ -4,7 +4,7 @@ import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from styles import inject, section_title, fmt_dt
 from users import require_permission
-from sidebar import render_sidebar
+from sidebar import render_sidebar, render_home_button
 from db import get_sb
 
 st.set_page_config(page_title="Audit Log — Duka", page_icon="◌", layout="wide", initial_sidebar_state="expanded")
@@ -14,6 +14,7 @@ render_sidebar()
 
 sb = get_sb()
 section_title("Audit Log", "Immutable record of all data changes")
+render_home_button()
 
 st.markdown('<div style="background:rgba(184,137,10,0.06);border:1px solid rgba(184,137,10,0.18);border-radius:6px;padding:10px 14px;font-size:11.5px;color:#4a4640;margin-bottom:18px">All entries are append-only. Modifications and deletions of this log are blocked at the database level (RLS). Every change across all tables is recorded here permanently.</div>', unsafe_allow_html=True)
 
