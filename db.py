@@ -1,8 +1,9 @@
+# -*- coding: utf-8 -*-
 import streamlit as st
 import json
 from datetime import datetime
-from functools import lru_cache
 from supabase import create_client
+from postgrest.exceptions import APIError
 
 # ── Constants ──────────────────────────────────────────────────
 STATUS_COLORS = {"Pending": "gold", "Ready": "info", "Delivered": "success", "Cancelled": "danger"}
@@ -12,6 +13,23 @@ STATUS_HEX = {"Pending": "#b8890a", "Ready": "#1a6094", "Delivered": "#1e8449", 
 def get_sb():
     """Get cached Supabase client instance."""
     return create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
+
+
+def _safe_execute(query):
+    """Execute a Supabase query and return data, swallowing schema mismatch API errors."""
+    try:
+        return query.execute().data
+    except APIError:
+        return None
+
+
+def _sum_quantities_by_item(rows):
+    """Aggregate inventory ledger quantity changes by item_id."""
+    totals = {}
+    for row in rows or []:
+        item_id = row["item_id"]
+        totals[item_id] = totals.get(item_id, 0) + row["quantity_change"]
+    return totals
 
 def load_inventory(sb=None):
     """Load inventory with stock levels efficiently.
@@ -25,10 +43,19 @@ def load_inventory(sb=None):
     if sb is None:
         sb = get_sb()
     
-    # Fetch active catalog items
-    cat = sb.table("catalog").select(
-        "item_id,name,type,uom,current_landed_cost,default_sell_price,is_active"
-    ).eq("is_active", True).order("name").execute().data
+    # Fetch active catalog items (with fallback for schemas that do not have is_active)
+    cat = _safe_execute(
+        sb.table("catalog")
+        .select("item_id,name,type,uom,current_landed_cost,default_sell_price,is_active")
+        .eq("is_active", True)
+        .order("name")
+    )
+    if cat is None:
+        cat = _safe_execute(
+            sb.table("catalog")
+            .select("item_id,name,type,uom,current_landed_cost,default_sell_price")
+            .order("name")
+        ) or []
     
     if not cat:
         return []
@@ -36,11 +63,7 @@ def load_inventory(sb=None):
     # Fetch inventory ledger and aggregate by item_id in one pass
     led = sb.table("inventory_ledger").select("item_id,quantity_change").execute().data
     
-    # Aggregate quantities using efficient dict comprehension
-    totals = {}
-    for r in led:
-        item_id = r["item_id"]
-        totals[item_id] = totals.get(item_id, 0) + r["quantity_change"]
+    totals = _sum_quantities_by_item(led)
     
     # Add stock levels to catalog items
     for c in cat:
@@ -86,7 +109,7 @@ def audit(table, record_id, action, old_data=None, new_data=None, reason=None, c
     from users import current_user
     u = current_user()
     
-    sb.table("audit_log").insert({
+    payload = {
         "table_name": table,
         "record_id": str(record_id),
         "action": action,
@@ -96,7 +119,28 @@ def audit(table, record_id, action, old_data=None, new_data=None, reason=None, c
         "reason": reason,
         "performed_by_username": u.get("username") if u else None,
         "performed_by_name": u.get("full_name") if u else None,
-    }).execute()
+    }
+
+    # Backward-compatible insert for deployments where audit_log schema differs.
+    # If PostgREST reports a missing column, remove it and retry.
+    while True:
+        try:
+            sb.table("audit_log").insert(payload).execute()
+            break
+        except APIError as err:
+            message = str(err)
+            marker = "Could not find the '"
+            if marker not in message:
+                raise
+
+            try:
+                missing_col = message.split(marker, 1)[1].split("' column", 1)[0]
+            except Exception:
+                raise
+
+            if missing_col not in payload:
+                raise
+            payload.pop(missing_col, None)
 
 def fmt(n):
     """Format number as currency with 2 decimal places."""
@@ -113,3 +157,110 @@ def fmt_dt(s):
         return datetime.fromisoformat(s.replace("Z", "")).strftime("%d %b %Y %H:%M")
     except (ValueError, AttributeError):
         return str(s)[:16]
+
+
+@st.cache_data(ttl=90, show_spinner=False)
+def fetch_dashboard_snapshot(role: str):
+    """
+    Fetch dashboard data in a cache-friendly shape.
+
+    Uses a short TTL to reduce repeated Supabase round-trips while keeping
+    operational data relatively fresh for Streamlit Cloud sessions.
+    """
+    sb = get_sb()
+    orders_result = (
+        sb.table("sales_orders")
+        .select("order_id,total_amount,deposit_paid,balance_due,status,customer_name,created_at")
+        .order("created_at", desc=True)
+        .limit(200)
+        .execute()
+    )
+    payload = {"orders": orders_result.data or []}
+
+    if role == "admin":
+        inventory_catalog = _safe_execute(sb.table("catalog").select("item_id,current_landed_cost"))
+        if inventory_catalog is None:
+            item_only_rows = _safe_execute(sb.table("catalog").select("item_id")) or []
+            inventory_catalog = [
+                {"item_id": row["item_id"], "current_landed_cost": 0}
+                for row in item_only_rows
+            ]
+
+        payload["lines"] = _safe_execute(sb.table("order_lines").select("line_cogs")) or []
+        payload["expenses"] = _safe_execute(sb.table("expenses").select("amount,category")) or []
+        payload["inventory_catalog"] = inventory_catalog
+        payload["inventory_ledger"] = (
+            _safe_execute(sb.table("inventory_ledger").select("item_id,quantity_change")) or []
+        )
+
+    if role == "manager":
+        payload["expenses"] = (
+            _safe_execute(
+                sb.table("expenses")
+                .select("amount,category,description,expense_date")
+                .order("expense_date", desc=True)
+                .limit(50)
+            )
+            or []
+        )
+
+    if role == "cashier":
+        payload["inventory"] = load_inventory(sb=sb)
+
+    return payload
+
+
+def compute_inventory_value(catalog_rows, ledger_rows):
+    """Compute total inventory valuation from catalog costs and ledger balances."""
+    totals = _sum_quantities_by_item(ledger_rows)
+    return sum(max(totals.get(c["item_id"], 0), 0) * c["current_landed_cost"] for c in catalog_rows or [])
+
+
+def fetch_catalog_for_pos(sb):
+    """
+    Fetch POS catalog data with compatibility fallbacks for older/newer schemas.
+    """
+    select_candidates = [
+        ("item_id,name,uom,default_sell_price,current_landed_cost,is_active", True),
+        ("item_id,name,uom,default_sell_price,current_landed_cost", False),
+        ("item_id,name,uom,default_sell_price,is_active", True),
+        ("item_id,name,uom,default_sell_price", False),
+        ("item_id,name,uom,current_landed_cost,is_active", True),
+        ("item_id,name,uom,current_landed_cost", False),
+        ("item_id,name,uom", False),
+    ]
+
+    rows = []
+    for select_clause, has_is_active in select_candidates:
+        query = sb.table("catalog").select(select_clause).order("name")
+        if has_is_active:
+            query = query.eq("is_active", True)
+        rows = _safe_execute(query)
+        if rows is not None:
+            break
+
+    normalized = []
+    for row in rows or []:
+        normalized.append(
+            {
+                "item_id": row.get("item_id"),
+                "name": row.get("name", "Unnamed Item"),
+                "uom": row.get("uom", "unit"),
+                "default_sell_price": float(row.get("default_sell_price") or 0),
+                "current_landed_cost": float(row.get("current_landed_cost") or 0),
+            }
+        )
+    return normalized
+
+
+def fetch_catalog_cost_map(sb, item_ids):
+    """Return {item_id: current_landed_cost} with fallback for missing cost columns."""
+    if not item_ids:
+        return {}
+    rows = _safe_execute(
+        sb.table("catalog").select("item_id,current_landed_cost").in_("item_id", item_ids)
+    )
+    if rows is None:
+        rows = _safe_execute(sb.table("catalog").select("item_id").in_("item_id", item_ids)) or []
+        return {r["item_id"]: 0 for r in rows}
+    return {r["item_id"]: float(r.get("current_landed_cost") or 0) for r in rows}
