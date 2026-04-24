@@ -18,21 +18,22 @@ import streamlit as st
 # ── Default profiles (overridden by secrets.toml if present) ──
 DEFAULT_USERS = {
     "admin": {
-        "password": "admin123",
-        "full_name": "Shop Owner",
+        "password": "admin2026",
+        "full_name": "FABRICE HIRWA",
         "role": "admin",
     },
     "manager": {
-        "password": "manager123",
-        "full_name": "Shop Manager",
+        "password": "manager2000",
+        "full_name": "MAMA FILS",
         "role": "manager",
     },
     "cashier": {
-        "password": "cashier123",
-        "full_name": "Cashier",
+        "password": "Kessy123",
+        "full_name": "KESSY NYINAWUMUNTU",
         "role": "cashier",
     },
 }
+
 
 def get_users() -> dict:
     """Merge default users with any overrides in secrets.toml [users.*]"""
