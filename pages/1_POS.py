@@ -4,6 +4,14 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from styles import inject, section_title, fmt, divider
 from users import require_auth, can
 from sidebar import render_sidebar, render_home_button
+import db as db_module
+from db import get_sb, audit, fetch_catalog_for_pos, fetch_catalog_cost_map
+
+insert_with_schema_fallback = getattr(
+    db_module,
+    "insert_with_schema_fallback",
+    lambda sb, table_name, payload: (sb.table(table_name).insert(payload).execute().data or [None])[0],
+)
 from db import get_sb, audit, fetch_catalog_for_pos, fetch_catalog_cost_map, insert_with_schema_fallback
 from db import get_sb, audit, fetch_catalog_for_pos, fetch_catalog_cost_map
 

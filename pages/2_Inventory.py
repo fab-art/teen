@@ -5,8 +5,21 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from styles import inject, section_title, kpi, fmt, table_html
 from users import require_permission, can
 from sidebar import render_sidebar, render_home_button
+import db as db_module
+from db import get_sb, audit, load_inventory, moving_avg_lc
 from db import get_sb, audit, load_inventory, moving_avg_lc, insert_with_schema_fallback, update_with_schema_fallback
 from db import get_sb, audit, load_inventory, moving_avg_lc, insert_with_schema_fallback
+
+insert_with_schema_fallback = getattr(
+    db_module,
+    "insert_with_schema_fallback",
+    lambda sb, table_name, payload: (sb.table(table_name).insert(payload).execute().data or [None])[0],
+)
+update_with_schema_fallback = getattr(
+    db_module,
+    "update_with_schema_fallback",
+    lambda sb, table_name, payload, match_col, match_val: sb.table(table_name).update(payload).eq(match_col, match_val).execute().data,
+)
 
 st.set_page_config(page_title="Inventory — Duka", page_icon="◫", layout="wide", initial_sidebar_state="expanded")
 inject()
