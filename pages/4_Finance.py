@@ -3,7 +3,7 @@ import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from styles import inject, section_title, kpi, fmt, fmt_dt, divider, table_html
 from users import require_permission, can
-from sidebar import render_sidebar
+from sidebar import render_sidebar, render_home_button
 from db import get_sb, audit
 
 st.set_page_config(page_title="Finance — Duka", page_icon="◑", layout="wide", initial_sidebar_state="expanded")
@@ -13,11 +13,34 @@ render_sidebar()
 
 sb = get_sb()
 section_title("Finance", "Revenue, expenses & payables")
+render_home_button()
+
+
+def _select_with_optional_is_voided(table_name, select_clause, *, order_by=None, desc=False, limit=None):
+    """Query helper that tolerates deployments where `is_voided` does not exist."""
+    def _build_query(include_is_voided_filter: bool):
+        query = sb.table(table_name).select(select_clause)
+        if include_is_voided_filter:
+            query = query.eq("is_voided", False)
+        if order_by:
+            query = query.order(order_by, desc=desc)
+        if limit:
+            query = query.limit(limit)
+        return query
+
+    try:
+        return _build_query(True).execute().data
+    except Exception as err:
+        if "is_voided" not in str(err):
+            raise
+        return _build_query(False).execute().data
+
 
 orders   = sb.table("sales_orders").select("total_amount,status").neq("status","Cancelled").execute().data
-lines    = sb.table("order_lines").select("line_cogs").eq("is_voided",False).execute().data
-expenses = sb.table("expenses").select("amount").eq("is_voided",False).execute().data
-invoices = sb.table("purchase_invoices").select("landed_cost,suppliers(name)").eq("status","On Credit").eq("is_voided",False).execute().data
+lines    = _select_with_optional_is_voided("order_lines", "line_cogs")
+expenses = _select_with_optional_is_voided("expenses", "amount")
+invoices = _select_with_optional_is_voided("purchase_invoices", "landed_cost,suppliers(name),status")
+invoices = [inv for inv in invoices if inv.get("status") == "On Credit"] if invoices else []
 
 revenue   = sum(o["total_amount"] for o in orders)
 cogs      = sum(l["line_cogs"] for l in lines)
@@ -62,7 +85,11 @@ with tab_ap:
         st.markdown(f'<div style="margin-top:10px;font-family:DM Mono,monospace;font-size:12px;color:#847e76">Total payable: <span style="color:#c0392b">{fmt(total_ap)}</span></div>', unsafe_allow_html=True)
         if can("manage_payables"):
             st.markdown("")
-            credit_invs=sb.table("purchase_invoices").select("invoice_id,purchase_price,freight_cost,suppliers(name),invoice_date").eq("status","On Credit").eq("is_voided",False).execute().data
+            credit_invs=_select_with_optional_is_voided(
+                "purchase_invoices",
+                "invoice_id,purchase_price,freight_cost,suppliers(name),invoice_date,status",
+            )
+            credit_invs = [inv for inv in credit_invs if inv.get("status") == "On Credit"]
             if credit_invs:
                 inv_opts={f'{i.get("suppliers",{}).get("name","?") if i.get("suppliers") else "?"} — {fmt((i["purchase_price"] or 0)+(i["freight_cost"] or 0))} — {fmt_dt(i["invoice_date"])}':i for i in credit_invs}
                 with st.form("mark_paid"):
