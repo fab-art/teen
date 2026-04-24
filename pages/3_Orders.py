@@ -3,7 +3,7 @@ import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from styles import inject, section_title, fmt, fmt_dt
 from users import require_permission, can
-from sidebar import render_sidebar
+from sidebar import render_sidebar, render_home_button
 from db import get_sb, audit
 
 st.set_page_config(page_title="Orders — Duka", page_icon="◎", layout="wide", initial_sidebar_state="expanded")
@@ -13,6 +13,7 @@ render_sidebar()
 
 sb = get_sb()
 section_title("Orders", "Manage, edit and track all orders")
+render_home_button()
 
 SC_HEX = {"Pending":"#b8890a","Ready":"#1a6094","Delivered":"#1e8449","Cancelled":"#c0392b"}
 

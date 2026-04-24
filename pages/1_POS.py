@@ -3,7 +3,7 @@ import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from styles import inject, section_title, fmt, divider
 from users import require_auth, can
-from sidebar import render_sidebar
+from sidebar import render_sidebar, render_home_button
 from db import get_sb, audit, fetch_catalog_for_pos, fetch_catalog_cost_map
 
 st.set_page_config(page_title="POS — Duka", page_icon="◉", layout="wide", initial_sidebar_state="expanded")
@@ -13,6 +13,7 @@ render_sidebar()
 
 sb = get_sb()
 section_title("Point of Sale", "Create new orders")
+render_home_button()
 
 catalog = fetch_catalog_for_pos(sb)
 if "cart" not in st.session_state:

@@ -4,7 +4,7 @@ import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from styles import inject, section_title, kpi, fmt, table_html
 from users import require_permission, can
-from sidebar import render_sidebar
+from sidebar import render_sidebar, render_home_button
 from db import get_sb, audit, load_inventory, moving_avg_lc
 
 st.set_page_config(page_title="Inventory — Duka", page_icon="◫", layout="wide", initial_sidebar_state="expanded")
@@ -14,6 +14,7 @@ render_sidebar()
 
 sb  = get_sb()
 section_title("Inventory", "Stock levels, inwarding & adjustments")
+render_home_button()
 
 inv = load_inventory()
 df  = pd.DataFrame(inv) if inv else pd.DataFrame()
