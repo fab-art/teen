@@ -27,6 +27,13 @@ ROLE_BADGE = {
     "cashier": ("cashier", "Cashier"),
 }
 
+def render_home_button(label: str = "← Back to Dashboard"):
+    """Render a consistent back/home button for all non-home pages."""
+    col_left, _ = st.columns([1, 5])
+    with col_left:
+        if st.button(label, key=f"home_btn_{label}", use_container_width=True):
+            st.switch_page("Home.py")
+
 def render_sidebar():
     st.markdown("""
 <style>

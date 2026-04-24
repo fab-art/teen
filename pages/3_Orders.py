@@ -3,8 +3,20 @@ import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from styles import inject, section_title, fmt, fmt_dt
 from users import require_permission, can
-from sidebar import render_sidebar
+from sidebar import render_sidebar, render_home_button
+import db as db_module
 from db import get_sb, audit
+
+insert_with_schema_fallback = getattr(
+    db_module,
+    "insert_with_schema_fallback",
+    lambda sb, table_name, payload: (sb.table(table_name).insert(payload).execute().data or [None])[0],
+)
+update_with_schema_fallback = getattr(
+    db_module,
+    "update_with_schema_fallback",
+    lambda sb, table_name, payload, match_col, match_val: sb.table(table_name).update(payload).eq(match_col, match_val).execute().data,
+)
 
 st.set_page_config(page_title="Orders — Duka", page_icon="◎", layout="wide", initial_sidebar_state="expanded")
 inject()
@@ -13,6 +25,7 @@ render_sidebar()
 
 sb = get_sb()
 section_title("Orders", "Manage, edit and track all orders")
+render_home_button()
 
 SC_HEX = {"Pending":"#b8890a","Ready":"#1a6094","Delivered":"#1e8449","Cancelled":"#c0392b"}
 
@@ -66,11 +79,17 @@ else:
                                 if not vr: st.error("Reason required")
                                 else:
                                     vl=void_opts[vs]; old=dict(vl)
-                                    sb.table("order_lines").update({"is_voided":True,"void_reason":vr,"voided_by":st.session_state.get("username")}).eq("line_id",vl["line_id"]).execute()
-                                    sb.table("inventory_ledger").insert({"item_id":vl["item_id"],"transaction_type":"VOID_SALE","quantity_change":vl["quantity"],"unit_cost":vl["line_cogs"]/vl["quantity"] if vl["quantity"] else 0,"reference_id":order["order_id"],"notes":f"Void: {vr}","created_by":st.session_state.get("username")}).execute()
-                                    remaining=sb.table("order_lines").select("quantity,unit_price").eq("order_id",order["order_id"]).eq("is_voided",False).execute().data
+                                    upd = update_with_schema_fallback(sb, "order_lines", {"is_voided":True,"void_reason":vr,"voided_by":st.session_state.get("username")}, "line_id", vl["line_id"])
+                                    if upd is None:
+                                        st.warning("This database schema does not support line-level void updates.")
+                                        st.stop()
+                                    insert_with_schema_fallback(sb, "inventory_ledger", {"item_id":vl["item_id"],"transaction_type":"VOID_SALE","quantity_change":vl["quantity"],"unit_cost":vl["line_cogs"]/vl["quantity"] if vl["quantity"] else 0,"reference_id":order["order_id"],"notes":f"Void: {vr}","created_by":st.session_state.get("username")})
+                                    try:
+                                        remaining=sb.table("order_lines").select("quantity,unit_price").eq("order_id",order["order_id"]).eq("is_voided",False).execute().data
+                                    except Exception:
+                                        remaining=sb.table("order_lines").select("quantity,unit_price").eq("order_id",order["order_id"]).execute().data
                                     new_total=sum(l["quantity"]*l["unit_price"] for l in remaining)
-                                    sb.table("sales_orders").update({"total_amount":new_total}).eq("order_id",order["order_id"]).execute()
+                                    update_with_schema_fallback(sb, "sales_orders", {"total_amount":new_total}, "order_id", order["order_id"])
                                     audit("order_lines",vl["line_id"],"VOID",old_data=old,reason=vr)
                                     st.success("Line voided."); st.rerun()
 
@@ -92,6 +111,6 @@ else:
                                 if nd!=order["deposit_paid"]: changes["deposit_paid"]=nd; cf.append("deposit_paid")
                                 if nn!=(order.get("notes") or ""): changes["notes"]=nn; cf.append("notes")
                                 if changes:
-                                    sb.table("sales_orders").update(changes).eq("order_id",order["order_id"]).execute()
+                                    update_with_schema_fallback(sb, "sales_orders", changes, "order_id", order["order_id"])
                                     audit("sales_orders",order["order_id"],"UPDATE",old_data=dict(order),new_data=changes,changed_fields=cf,reason=er)
                                     st.success("Updated."); st.rerun()
