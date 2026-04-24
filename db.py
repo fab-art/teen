@@ -3,6 +3,7 @@ import streamlit as st
 import json
 from datetime import datetime
 from supabase import create_client
+from postgrest.exceptions import APIError
 
 # ── Constants ──────────────────────────────────────────────────
 STATUS_COLORS = {"Pending": "gold", "Ready": "info", "Delivered": "success", "Cancelled": "danger"}
