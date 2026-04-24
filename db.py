@@ -316,6 +316,8 @@ def update_with_schema_fallback(sb, table_name, payload, match_col, match_val):
             missing_col = _missing_column_from_error(err)
             if not missing_col:
                 raise
+            if missing_col == match_col:
+                return None
             message = str(err)
             marker = "Could not find the '"
             if marker not in message:
