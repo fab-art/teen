@@ -31,7 +31,7 @@ def _select_with_optional_is_voided(table_name, select_clause, *, order_by=None,
 
     try:
         return _build_query(True).execute().data
-    except APIError as err:
+    except Exception as err:
         if "is_voided" not in str(err):
             raise
         return _build_query(False).execute().data

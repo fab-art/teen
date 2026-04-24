@@ -19,7 +19,7 @@ def _safe_execute(query):
     """Execute a Supabase query and return data, swallowing schema mismatch API errors."""
     try:
         return query.execute().data
-    except APIError:
+    except Exception:
         return None
 
 
@@ -127,7 +127,7 @@ def audit(table, record_id, action, old_data=None, new_data=None, reason=None, c
         try:
             sb.table("audit_log").insert(payload).execute()
             break
-        except APIError as err:
+        except Exception as err:
             message = str(err)
             marker = "Could not find the '"
             if marker not in message:
@@ -278,7 +278,7 @@ def insert_with_schema_fallback(sb, table_name, payload):
         try:
             result = sb.table(table_name).insert(row).execute()
             return (result.data or [None])[0]
-        except APIError as err:
+        except Exception as err:
             message = str(err)
             marker = "Could not find the '"
             if marker not in message:
