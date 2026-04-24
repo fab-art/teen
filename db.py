@@ -3,6 +3,7 @@ import streamlit as st
 import json
 from datetime import datetime
 from supabase import create_client
+from postgrest.exceptions import APIError
 
 # ── Constants ──────────────────────────────────────────────────
 STATUS_COLORS = {"Pending": "gold", "Ready": "info", "Delivered": "success", "Cancelled": "danger"}
@@ -142,6 +143,16 @@ def audit(table, record_id, action, old_data=None, new_data=None, reason=None, c
             missing_col = _missing_column_from_error(err)
             if not missing_col:
                 raise
+            message = str(err)
+            marker = "Could not find the '"
+            if marker not in message:
+                raise
+
+            try:
+                missing_col = message.split(marker, 1)[1].split("' column", 1)[0]
+            except Exception:
+                raise
+
             if missing_col not in payload:
                 raise
             payload.pop(missing_col, None)
@@ -307,6 +318,11 @@ def update_with_schema_fallback(sb, table_name, payload, match_col, match_val):
                 raise
             if missing_col == match_col:
                 return None
+            message = str(err)
+            marker = "Could not find the '"
+            if marker not in message:
+                raise
+            missing_col = message.split(marker, 1)[1].split("' column", 1)[0]
             if missing_col not in row:
                 raise
             row.pop(missing_col, None)

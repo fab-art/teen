@@ -5,6 +5,7 @@ from styles import inject, section_title, fmt, divider
 from users import require_auth, can
 from sidebar import render_sidebar, render_home_button
 from db import get_sb, audit, fetch_catalog_for_pos, fetch_catalog_cost_map, insert_with_schema_fallback
+from db import get_sb, audit, fetch_catalog_for_pos, fetch_catalog_cost_map
 
 st.set_page_config(page_title="POS — Duka", page_icon="◉", layout="wide", initial_sidebar_state="expanded")
 inject()
