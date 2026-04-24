@@ -5,6 +5,7 @@ from styles import inject, section_title, fmt, fmt_dt
 from users import require_permission, can
 from sidebar import render_sidebar, render_home_button
 from db import get_sb, audit, insert_with_schema_fallback, update_with_schema_fallback
+from db import get_sb, audit
 
 st.set_page_config(page_title="Orders — Duka", page_icon="◎", layout="wide", initial_sidebar_state="expanded")
 inject()

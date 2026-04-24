@@ -6,6 +6,7 @@ from styles import inject, section_title, kpi, fmt, table_html
 from users import require_permission, can
 from sidebar import render_sidebar, render_home_button
 from db import get_sb, audit, load_inventory, moving_avg_lc, insert_with_schema_fallback, update_with_schema_fallback
+from db import get_sb, audit, load_inventory, moving_avg_lc, insert_with_schema_fallback
 
 st.set_page_config(page_title="Inventory — Duka", page_icon="◫", layout="wide", initial_sidebar_state="expanded")
 inject()
