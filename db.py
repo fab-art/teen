@@ -264,3 +264,26 @@ def fetch_catalog_cost_map(sb, item_ids):
         rows = _safe_execute(sb.table("catalog").select("item_id").in_("item_id", item_ids)) or []
         return {r["item_id"]: 0 for r in rows}
     return {r["item_id"]: float(r.get("current_landed_cost") or 0) for r in rows}
+
+
+def insert_with_schema_fallback(sb, table_name, payload):
+    """
+    Insert row while tolerating missing columns in older schemas.
+
+    If PostgREST reports a missing column, the column is removed from payload
+    and the insert is retried.
+    """
+    row = dict(payload)
+    while True:
+        try:
+            result = sb.table(table_name).insert(row).execute()
+            return (result.data or [None])[0]
+        except APIError as err:
+            message = str(err)
+            marker = "Could not find the '"
+            if marker not in message:
+                raise
+            missing_col = message.split(marker, 1)[1].split("' column", 1)[0]
+            if missing_col not in row:
+                raise
+            row.pop(missing_col, None)

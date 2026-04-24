@@ -37,27 +37,6 @@ def _select_with_optional_is_voided(table_name, select_clause, *, order_by=None,
         return _build_query(False).execute().data
 
 
-
-def _select_with_optional_is_voided(table_name, select_clause, *, order_by=None, desc=False, limit=None):
-    """Query helper that tolerates deployments where `is_voided` does not exist."""
-    def _build_query(include_is_voided_filter: bool):
-        query = sb.table(table_name).select(select_clause)
-        if include_is_voided_filter:
-            query = query.eq("is_voided", False)
-        if order_by:
-            query = query.order(order_by, desc=desc)
-        if limit:
-            query = query.limit(limit)
-        return query
-
-    try:
-        return _build_query(True).execute().data
-    except APIError as err:
-        if "is_voided" not in str(err):
-            raise
-        return _build_query(False).execute().data
-
-
 orders   = sb.table("sales_orders").select("total_amount,status").neq("status","Cancelled").execute().data
 lines    = _select_with_optional_is_voided("order_lines", "line_cogs")
 expenses = _select_with_optional_is_voided("expenses", "amount")

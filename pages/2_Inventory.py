@@ -5,7 +5,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from styles import inject, section_title, kpi, fmt, table_html
 from users import require_permission, can
 from sidebar import render_sidebar, render_home_button
-from db import get_sb, audit, load_inventory, moving_avg_lc
+from db import get_sb, audit, load_inventory, moving_avg_lc, insert_with_schema_fallback
 
 st.set_page_config(page_title="Inventory — Duka", page_icon="◫", layout="wide", initial_sidebar_state="expanded")
 inject()
@@ -83,11 +83,11 @@ with tab2:
                     new_avg=moving_avg_lc(sb,item_id,qty,lc)
                     sb.table("catalog").update({"current_landed_cost":new_avg}).eq("item_id",item_id).execute()
                     audit("catalog",item_id,"UPDATE",old_data=old,new_data={"current_landed_cost":new_avg},changed_fields=["current_landed_cost"],reason="Landed cost update on inward")
-                led=sb.table("inventory_ledger").insert({"item_id":item_id,"transaction_type":"INWARD","quantity_change":qty,"unit_cost":round(lc,2),"created_by":st.session_state.get("username")}).execute().data[0]
+                led=insert_with_schema_fallback(sb, "inventory_ledger", {"item_id":item_id,"transaction_type":"INWARD","quantity_change":qty,"unit_cost":round(lc,2),"created_by":st.session_state.get("username")}) or {}
                 inv_d={"item_id":item_id,"quantity":qty,"purchase_price":purchase,"freight_cost":freight,"status":pay,"created_by":st.session_state.get("username")}
                 if sup_map.get(sup_sel): inv_d["supplier_id"]=sup_map[sup_sel]
-                sb.table("purchase_invoices").insert(inv_d).execute()
-                audit("inventory_ledger",led["ledger_id"],"INSERT",new_data=led,reason="Stock inward")
+                insert_with_schema_fallback(sb, "purchase_invoices", inv_d)
+                audit("inventory_ledger",led.get("ledger_id", item_id),"INSERT",new_data=led,reason="Stock inward")
                 st.success("Stock received!"); st.rerun()
 
 with tab3:
@@ -107,8 +107,8 @@ with tab3:
                         if not ar2: st.error("Reason required")
                         elif ac==0: st.error("Change cannot be zero")
                         else:
-                            led=sb.table("inventory_ledger").insert({"item_id":ar["item_id"],"transaction_type":"ADJUSTMENT","quantity_change":ac,"notes":f"{at}: {ar2}","created_by":st.session_state.get("username")}).execute().data[0]
-                            audit("inventory_ledger",led["ledger_id"],"ADJUST",new_data={"item":ai,"change":ac,"type":at},reason=ar2)
+                            led=insert_with_schema_fallback(sb, "inventory_ledger", {"item_id":ar["item_id"],"transaction_type":"ADJUSTMENT","quantity_change":ac,"notes":f"{at}: {ar2}","created_by":st.session_state.get("username")}) or {}
+                            audit("inventory_ledger",led.get("ledger_id", ar["item_id"]),"ADJUST",new_data={"item":ai,"change":ac,"type":at},reason=ar2)
                             st.success(f"Adjustment applied: {'+' if ac>0 else ''}{ac} {ar['uom']}"); st.rerun()
         with sub2:
             if not df.empty:
