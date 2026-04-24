@@ -5,7 +5,9 @@ from styles import inject, section_title, kpi, fmt, fmt_dt, divider, table_html
 from users import require_permission, can
 from sidebar import render_sidebar, render_home_button
 import db as db_module
+from db import get_sb, audit, insert_with_schema_fallback, update_with_schema_fallback
 from db import get_sb, audit
+from postgrest.exceptions import APIError
 
 insert_with_schema_fallback = getattr(
     db_module,

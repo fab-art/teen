@@ -5,6 +5,7 @@ from styles import inject, section_title, fmt, fmt_dt
 from users import require_permission, can
 from sidebar import render_sidebar, render_home_button
 import db as db_module
+from db import get_sb, audit, insert_with_schema_fallback, update_with_schema_fallback
 from db import get_sb, audit
 
 insert_with_schema_fallback = getattr(
@@ -83,6 +84,7 @@ else:
                                     if upd is None:
                                         st.warning("This database schema does not support line-level void updates.")
                                         st.stop()
+                                    update_with_schema_fallback(sb, "order_lines", {"is_voided":True,"void_reason":vr,"voided_by":st.session_state.get("username")}, "line_id", vl["line_id"])
                                     insert_with_schema_fallback(sb, "inventory_ledger", {"item_id":vl["item_id"],"transaction_type":"VOID_SALE","quantity_change":vl["quantity"],"unit_cost":vl["line_cogs"]/vl["quantity"] if vl["quantity"] else 0,"reference_id":order["order_id"],"notes":f"Void: {vr}","created_by":st.session_state.get("username")})
                                     try:
                                         remaining=sb.table("order_lines").select("quantity,unit_price").eq("order_id",order["order_id"]).eq("is_voided",False).execute().data

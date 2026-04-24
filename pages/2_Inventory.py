@@ -7,6 +7,8 @@ from users import require_permission, can
 from sidebar import render_sidebar, render_home_button
 import db as db_module
 from db import get_sb, audit, load_inventory, moving_avg_lc
+from db import get_sb, audit, load_inventory, moving_avg_lc, insert_with_schema_fallback, update_with_schema_fallback
+from db import get_sb, audit, load_inventory, moving_avg_lc, insert_with_schema_fallback
 
 insert_with_schema_fallback = getattr(
     db_module,

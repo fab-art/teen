@@ -12,6 +12,8 @@ insert_with_schema_fallback = getattr(
     "insert_with_schema_fallback",
     lambda sb, table_name, payload: (sb.table(table_name).insert(payload).execute().data or [None])[0],
 )
+from db import get_sb, audit, fetch_catalog_for_pos, fetch_catalog_cost_map, insert_with_schema_fallback
+from db import get_sb, audit, fetch_catalog_for_pos, fetch_catalog_cost_map
 
 st.set_page_config(page_title="POS — Duka", page_icon="◉", layout="wide", initial_sidebar_state="expanded")
 inject()
